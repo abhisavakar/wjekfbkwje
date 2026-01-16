@@ -1,4 +1,4 @@
-"""Enhanced level detection with correctness analysis"""
+"""Enhanced level detection with Stabilization Logic (2-6-2 Strategy)"""
 
 import re
 from typing import Dict, List, Tuple, Optional
@@ -8,8 +8,8 @@ class LevelDetector:
     
     LEVEL_SIGNALS = {
         1: {
-            "strong": [r"i don'?t know", r"no idea", r"what (is|does|are|means?)", r"never (learned|heard)", r"lost", r"confus(ed|ing)", r"fail", r"hate math", r"mess of letters", r"don'?t get it"],
-            "weak": [r"forgot", r"unclear", r"hard", r"weird", r"guess"]
+            "strong": [r"i don'?t know", r"no idea", r"what (is|does|are|means?)", r"never (learned|heard)", r"lost", r"confus(ed|ing)", r"fail", r"hate math", r"mess of letters", r"don'?t get it", r"stuck"],
+            "weak": [r"forgot", r"unclear", r"hard", r"weird", r"guess", r"tricky"]
         },
         2: {
             "strong": [r"i think (maybe|it'?s)", r"i guess", r"is it\s*\?", r"not sure", r"probably", r"might be", r"um+,"],
@@ -17,29 +17,27 @@ class LevelDetector:
         },
         3: {
             "strong": [r"\bbecause\b", r"so (that|then)", r"for example", r"means that", r"like if", r"makes sense"],
-            "weak": [r"i know", r"remember", r"ok"]
+            "weak": [r"i know", r"remember", r"ok", r"got it"]
         },
         4: {
             "strong": [r"similar to", r"relates to", r"connect(ion|s)", r"reason is", r"in other words", r"analogy", r"compared to"],
             "weak": [r"another way", r"also"]
         },
         5: {
-            "strong": [r"what if", r"i wonder", r"deep", r"assume", r"hypothetical", r"limitation", r"generalize", r"imply", r"implies", r"theory", r"hypothesis"],
-            "weak": [r"curious", r"interesting", r"actually"]
+            "strong": [r"what if", r"i wonder", r"deep", r"assume", r"hypothetical", r"limitation", r"generalize", r"imply", r"implies", r"theory", r"hypothesis", r"paradox"],
+            "weak": [r"curious", r"interesting", r"actually", r"technically"]
         }
     }
     
-    # Technical terms that indicate higher levels (4/5) - EXPANDED FOR PHYSICS
+    # Advanced terms only
     TECHNICAL_TERMS = [
-        # Math
-        'coefficient', 'variable', 'function', 'derivative', 'integral', 'asymptote',
-        'intercept', 'slope', 'parabola', 'quadratic',
-        # Physics / Thermo
+        'derivative', 'integral', 'asymptote', 'limit', 'continuity',
+        'parametric', 'vector', 'scalar', 'matrix',
         'entropy', 'quantum', 'thermodynamic', 'enthalpy', 'ergodic', 'virial',
         'ensemble', 'microstate', 'partition', 'hamiltonian', 'trajectory',
-        'momentum', 'velocity', 'spontaneous', 'equilibrium', 'activation energy',
-        'catalyst', 'kinetic', 'gibbs', 'boltzmann', 'phase transition',
-        'chemical potential', 'viscosity', 'diffusivity'
+        'spontaneous', 'equilibrium', 'activation energy', 'catalyst', 
+        'gibbs', 'boltzmann', 'phase transition', 'chemical potential',
+        'recurrence', 'bekenstein', 'hawking', 'past hypothesis'
     ]
     
     CORRECTNESS_PATTERNS = {
@@ -53,6 +51,8 @@ class LevelDetector:
         self.confidence = 0.0
         self.turns_analyzed = 0
         self.correctness_history = []
+        self.confusion_detected = False
+        self.advanced_vocabulary_count = 0
     
     def add_exchange(self, tutor_msg: str, student_msg: str):
         self.turns_analyzed += 1
@@ -67,35 +67,37 @@ class LevelDetector:
         
         if is_correct and not is_incorrect:
             self.correctness_history.append(True)
-            # FIX: If student is struggling (Level 1 range), don't boost to Level 2/3 just for getting a guided question right.
-            if self.current_estimate < 1.8:
-                pass # Do nothing, stay at Level 1
-            else:
-                self.level_scores[3] += 1.0
-                self.level_scores[4] += 0.5
+            # Correct = Level 3 (Competent)
+            self.level_scores[3] += 2.0
         elif is_incorrect:
             self.correctness_history.append(False)
-            self.level_scores[1] += 1.5 # Stronger penalty
+            self.level_scores[1] += 1.5
             self.level_scores[2] += 1.0
     
     def _analyze_response(self, response: str):
         response_lower = response.lower()
         words = len(response.split())
         
-        # 1. Technical Terminology (Boosts Level 5)
+        # Check for confusion signs
+        if any(re.search(p, response_lower) for p in self.LEVEL_SIGNALS[1]["strong"] + self.LEVEL_SIGNALS[2]["strong"]):
+            self.confusion_detected = True
+        
+        # Check for Advanced Vocabulary
         term_count = sum(1 for term in self.TECHNICAL_TERMS if term in response_lower)
+        self.advanced_vocabulary_count += term_count
+        
         if term_count >= 1:
             self.level_scores[4] += 1.0 * term_count
-            self.level_scores[5] += 1.5 * term_count # Increased weight
+            self.level_scores[5] += 3.0 * term_count
 
-        # 2. Response Length
+        # Length Heuristic
         if words > 40:
-            self.level_scores[5] += 2.0
+            self.level_scores[5] += 1.0
             self.level_scores[4] += 1.0
         elif words < 6 and ("?" in response or "what" in response_lower):
-            self.level_scores[1] += 2.5
+            self.level_scores[1] += 2.0
             
-        # 3. Pattern Matching
+        # Pattern Matching
         for level, patterns in self.LEVEL_SIGNALS.items():
             for p in patterns["strong"]:
                 if re.search(p, response_lower):
@@ -108,32 +110,55 @@ class LevelDetector:
         total = sum(self.level_scores.values())
         if total == 0: return
 
-        # Calculate weighted average
+        # 1. Calculate Raw Estimate from Data
         weighted_sum = sum(lvl * score for lvl, score in self.level_scores.items())
-        estimate = weighted_sum / total
+        raw_estimate = weighted_sum / total
         
-        # --- EXTREME LEVEL CLAMPING (Aggressive) ---
-        l1_ratio = self.level_scores[1] / total
-        if l1_ratio > 0.25: # Lower threshold to catch Level 1
-            estimate = min(estimate, 1.4) # Force to Level 1 range
+        # 2. Apply Logical Clamps (Bounds Checking)
+        
+        # Level 1 Clamp
+        if (self.level_scores[1] / total) > 0.25: 
+            raw_estimate = min(raw_estimate, 1.4)
             
+        # Level 5 Clamp
         l5_ratio = self.level_scores[5] / total
-        if l5_ratio > 0.25:
-            estimate = max(estimate, 4.6) # Force to Level 5 range
+        if l5_ratio > 0.35: 
+            is_high_level_confusion = self.confusion_detected and self.advanced_vocabulary_count > 2
+            if self.confusion_detected and not is_high_level_confusion:
+                raw_estimate = min(raw_estimate, 3.8)
+            else:
+                raw_estimate = max(raw_estimate, 4.6)
+
+        # 3. STABILIZATION (The 2-6-2 Strategy)
+        # This prevents the "drifting up" issue by anchoring to the previous value.
+        
+        if self.turns_analyzed <= 2:
+            # Phase 1: Rapid Diagnosis
+            # Trust the raw data completely to allow quick jumps
+            self.current_estimate = raw_estimate
             
-        self.current_estimate = estimate
+        elif self.turns_analyzed <= 8:
+            # Phase 2: Dampened Teaching
+            # 80% Previous Estimate + 20% New Raw Data
+            # This makes the score "heavy" and hard to move up quickly
+            self.current_estimate = (self.current_estimate * 0.8) + (raw_estimate * 0.2)
+            
+        else:
+            # Phase 3: Lock
+            # 95% Previous Estimate + 5% New Data
+            # Effectively freezes the score for the final evaluation
+            self.current_estimate = (self.current_estimate * 0.95) + (raw_estimate * 0.05)
+            
         self.confidence = min(0.95, total * 0.1)
     
     def get_estimate(self) -> Tuple[float, float]:
         return self.current_estimate, self.confidence
-
 
 class HybridLevelDetector:
     def __init__(self, llm_client=None):
         self.rule_detector = LevelDetector()
         self.llm_client = llm_client
         self.topic = ""
-        self.llm_estimates = []
     
     def set_topic(self, topic: str):
         self.topic = topic
@@ -144,25 +169,24 @@ class HybridLevelDetector:
     def get_estimate(self, use_llm: bool = True) -> Tuple[float, float]:
         rule_est, rule_conf = self.rule_detector.get_estimate()
         
-        # Don't use LLM for very early turns or if rule confidence is high enough for extremes
-        if not use_llm or not self.llm_client or len(self.rule_detector.correctness_history) < 2:
+        if not use_llm or not self.llm_client:
             return rule_est, rule_conf
             
         try:
-            # Only send last 6 turns to keep context focused
-            llm_res = self.llm_client.analyze_level(
-                self.rule_detector.conversation_history[-6:], 
-                self.topic
-            )
+            llm_res = self.llm_client.analyze_level(self.rule_detector.conversation_history[-6:], self.topic)
             llm_est = float(llm_res.get("level", 3.0))
-            self.llm_estimates.append(llm_est)
             
-            # Combine: LLM 60%, Rules 40%
-            combined = (llm_est * 0.6) + (rule_est * 0.4)
+            # Use same dampening logic for LLM mix
+            # If we are late in the conversation, trust the stabilized rule detector more
+            if self.rule_detector.turns_analyzed > 5:
+                combined = (llm_est * 0.4) + (rule_est * 0.6)
+            else:
+                combined = (llm_est * 0.6) + (rule_est * 0.4)
             
-            # If rules say EXTME (1 or 5), trust rules more
+            # Safety Nets
             if rule_est < 1.5: combined = min(combined, 1.5)
-            if rule_est > 4.5: combined = max(combined, 4.5)
+            if self.rule_detector.confusion_detected and self.rule_detector.advanced_vocabulary_count <= 2:
+                combined = min(combined, 3.9)
             
             return combined, max(rule_conf, 0.8)
         except:
