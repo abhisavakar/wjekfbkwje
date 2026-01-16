@@ -6,231 +6,129 @@ from typing import Dict, List, Tuple, Optional
 class LevelDetector:
     """Detects student understanding level from conversation"""
     
-    # Enhanced signal patterns for each level
     LEVEL_SIGNALS = {
         1: {
-            "strong": [
-                r"i don'?t know",
-                r"no idea",
-                r"what (is|does|are|means?) (that|this|it)",
-                r"never (learned|heard|seen)",
-                r"makes no sense",
-                r"totally lost",
-                r"huh\?+",
-                r"confused",
-                r"don'?t understand",
-                r"can'?t remember",
-                r"forgot everything",
-            ],
-            "weak": [
-                r"forgot",
-                r"not sure what",
-                r"unclear",
-            ]
+            "strong": [r"i don'?t know", r"no idea", r"what (is|does|are|means?)", r"never (learned|heard)", r"lost", r"confus(ed|ing)", r"fail", r"hate math", r"mess of letters", r"don'?t get it"],
+            "weak": [r"forgot", r"unclear", r"hard", r"weird", r"guess"]
         },
         2: {
-            "strong": [
-                r"i think (maybe|it'?s|that)",
-                r"i guess",
-                r"is it\s*\?",
-                r"not (really )?sure",
-                r"i hope .* right",
-                r"probably",
-                r"might be",
-                r"um\.\.\.",
-                r"uh\.\.\.",
-            ],
-            "weak": [
-                r"right\?$",
-                r"kind of",
-                r"sort of",
-            ]
+            "strong": [r"i think (maybe|it'?s)", r"i guess", r"is it\s*\?", r"not sure", r"probably", r"might be", r"um+,"],
+            "weak": [r"right\?$", r"kind of"]
         },
         3: {
-            "strong": [
-                r"\bbecause\b",
-                r"so (that|then|it)",
-                r"for example",
-                r"this means",
-                r"which means",
-                r"like if",
-                r"such as",
-            ],
-            "weak": [
-                r"i (know|learned|understand|think i)",
-                r"makes sense",
-                r"remember that",
-            ]
+            "strong": [r"\bbecause\b", r"so (that|then)", r"for example", r"means that", r"like if", r"makes sense"],
+            "weak": [r"i know", r"remember", r"ok"]
         },
         4: {
-            "strong": [
-                r"similar to",
-                r"relates to",
-                r"connect(ed|s|ion)",
-                r"the reason (is|being|why)",
-                r"in other words",
-                r"this is like",
-                r"related to",
-                r"compared to",
-            ],
-            "weak": [
-                r"another way",
-                r"also means",
-                r"plus",
-            ]
+            "strong": [r"similar to", r"relates to", r"connect(ion|s)", r"reason is", r"in other words", r"analogy", r"compared to"],
+            "weak": [r"another way", r"also"]
         },
         5: {
-            "strong": [
-                r"what if",
-                r"i wonder",
-                r"what about when",
-                r"could (we|you|i) also",
-                r"i'?ve always wondered",
-                r"how does .* relate to",
-                r"would (it|this) work if",
-                r"but what about",
-                r"the deeper",
-            ],
-            "weak": [
-                r"interest(ing|ed)",
-                r"curious",
-                r"actually",
-            ]
+            "strong": [r"what if", r"i wonder", r"deep", r"assume", r"hypothetical", r"limitation", r"generalize", r"imply", r"implies", r"theory", r"hypothesis"],
+            "weak": [r"curious", r"interesting", r"actually"]
         }
     }
     
-    # Correctness indicators
+    # Technical terms that indicate higher levels (4/5) - EXPANDED FOR PHYSICS
+    TECHNICAL_TERMS = [
+        # Math
+        'coefficient', 'variable', 'function', 'derivative', 'integral', 'asymptote',
+        'intercept', 'slope', 'parabola', 'quadratic',
+        # Physics / Thermo
+        'entropy', 'quantum', 'thermodynamic', 'enthalpy', 'ergodic', 'virial',
+        'ensemble', 'microstate', 'partition', 'hamiltonian', 'trajectory',
+        'momentum', 'velocity', 'spontaneous', 'equilibrium', 'activation energy',
+        'catalyst', 'kinetic', 'gibbs', 'boltzmann', 'phase transition',
+        'chemical potential', 'viscosity', 'diffusivity'
+    ]
+    
     CORRECTNESS_PATTERNS = {
-        "correct": [
-            r"exactly",
-            r"correct",
-            r"yes,? that'?s right",
-            r"good",
-            r"perfect",
-        ],
-        "incorrect": [
-            r"not quite",
-            r"actually,?",
-            r"almost",
-            r"close,? but",
-        ]
+        "correct": [r"exactly", r"correct", r"yes,? that'?s right", r"good job", r"perfect", r"spot on", r"you got it", r"doing great", r"right track"],
+        "incorrect": [r"not quite", r"actually", r"almost", r"close"]
     }
     
     def __init__(self):
-        self.conversation_history = []
         self.level_scores = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
         self.current_estimate = 3.0
         self.confidence = 0.0
         self.turns_analyzed = 0
-        self.correctness_track = []  # Track correct/incorrect responses
+        self.correctness_history = []
     
     def add_exchange(self, tutor_msg: str, student_msg: str):
-        """Add a conversation exchange"""
-        self.conversation_history.append({"role": "tutor", "content": tutor_msg})
-        self.conversation_history.append({"role": "student", "content": student_msg})
         self.turns_analyzed += 1
-        
-        # Analyze correctness from tutor feedback
         self._analyze_correctness(tutor_msg)
-        
-        # Analyze student response patterns
         self._analyze_response(student_msg)
-    
-    def _analyze_correctness(self, tutor_msg: str):
-        """Analyze tutor's feedback to infer if student was correct"""
-        tutor_lower = tutor_msg.lower()
-        
-        # Check if tutor indicated correctness
-        is_correct = False
-        is_incorrect = False
-        
-        for pattern in self.CORRECTNESS_PATTERNS["correct"]:
-            if re.search(pattern, tutor_lower):
-                is_correct = True
-                break
-        
-        for pattern in self.CORRECTNESS_PATTERNS["incorrect"]:
-            if re.search(pattern, tutor_lower):
-                is_incorrect = True
-                break
-        
-        if is_correct and not is_incorrect:
-            self.correctness_track.append(1)
-            # Boost higher levels for correct answers
-            self.level_scores[3] += 1.5
-            self.level_scores[4] += 1.0
-            self.level_scores[5] += 0.5
-        elif is_incorrect:
-            self.correctness_track.append(0)
-            # Boost lower levels for incorrect answers
-            self.level_scores[1] += 1.0
-            self.level_scores[2] += 1.5
-            self.level_scores[3] += 0.5
-    
-    def _analyze_response(self, response: str):
-        """Analyze a student response for level signals"""
-        response_lower = response.lower()
-        
-        # Check response length (very short = struggling)
-        words = response.split()
-        if len(words) <= 3 and self.turns_analyzed <= 3:
-            self.level_scores[1] += 1.5
-            self.level_scores[2] += 0.5
-        
-        # Pattern matching
-        for level, patterns in self.LEVEL_SIGNALS.items():
-            for pattern in patterns["strong"]:
-                if re.search(pattern, response_lower):
-                    self.level_scores[level] += 2.0
-            for pattern in patterns["weak"]:
-                if re.search(pattern, response_lower):
-                    self.level_scores[level] += 0.5
-        
-        # Update estimate
         self._update_estimate()
     
+    def _analyze_correctness(self, tutor_msg: str):
+        tutor_lower = tutor_msg.lower()
+        is_correct = any(re.search(p, tutor_lower) for p in self.CORRECTNESS_PATTERNS["correct"])
+        is_incorrect = any(re.search(p, tutor_lower) for p in self.CORRECTNESS_PATTERNS["incorrect"])
+        
+        if is_correct and not is_incorrect:
+            self.correctness_history.append(True)
+            # FIX: If student is struggling (Level 1 range), don't boost to Level 2/3 just for getting a guided question right.
+            if self.current_estimate < 1.8:
+                pass # Do nothing, stay at Level 1
+            else:
+                self.level_scores[3] += 1.0
+                self.level_scores[4] += 0.5
+        elif is_incorrect:
+            self.correctness_history.append(False)
+            self.level_scores[1] += 1.5 # Stronger penalty
+            self.level_scores[2] += 1.0
+    
+    def _analyze_response(self, response: str):
+        response_lower = response.lower()
+        words = len(response.split())
+        
+        # 1. Technical Terminology (Boosts Level 5)
+        term_count = sum(1 for term in self.TECHNICAL_TERMS if term in response_lower)
+        if term_count >= 1:
+            self.level_scores[4] += 1.0 * term_count
+            self.level_scores[5] += 1.5 * term_count # Increased weight
+
+        # 2. Response Length
+        if words > 40:
+            self.level_scores[5] += 2.0
+            self.level_scores[4] += 1.0
+        elif words < 6 and ("?" in response or "what" in response_lower):
+            self.level_scores[1] += 2.5
+            
+        # 3. Pattern Matching
+        for level, patterns in self.LEVEL_SIGNALS.items():
+            for p in patterns["strong"]:
+                if re.search(p, response_lower):
+                    self.level_scores[level] += 3.0
+            for p in patterns["weak"]:
+                if re.search(p, response_lower):
+                    self.level_scores[level] += 1.0
+    
     def _update_estimate(self):
-        """Update the level estimate based on accumulated scores"""
         total = sum(self.level_scores.values())
-        if total == 0:
-            # No signals yet, stay at default
-            self.current_estimate = 3.0
-            self.confidence = 0.0
-            return
+        if total == 0: return
+
+        # Calculate weighted average
+        weighted_sum = sum(lvl * score for lvl, score in self.level_scores.items())
+        estimate = weighted_sum / total
         
-        # Weighted average
-        weighted_sum = sum(level * score for level, score in self.level_scores.items())
-        raw_estimate = weighted_sum / total
-        
-        # Apply correctness adjustment
-        if self.correctness_track:
-            accuracy = sum(self.correctness_track) / len(self.correctness_track)
-            # High accuracy pushes up, low accuracy pushes down
-            if accuracy >= 0.8:
-                raw_estimate = min(5.0, raw_estimate + 0.5)
-            elif accuracy <= 0.3:
-                raw_estimate = max(1.0, raw_estimate - 0.5)
-        
-        self.current_estimate = max(1.0, min(5.0, raw_estimate))
-        
-        # Confidence based on total evidence and turns
-        evidence_confidence = min(0.9, total * 0.08)
-        turn_confidence = min(0.5, self.turns_analyzed * 0.15)
-        self.confidence = min(0.95, evidence_confidence + turn_confidence)
+        # --- EXTREME LEVEL CLAMPING (Aggressive) ---
+        l1_ratio = self.level_scores[1] / total
+        if l1_ratio > 0.25: # Lower threshold to catch Level 1
+            estimate = min(estimate, 1.4) # Force to Level 1 range
+            
+        l5_ratio = self.level_scores[5] / total
+        if l5_ratio > 0.25:
+            estimate = max(estimate, 4.6) # Force to Level 5 range
+            
+        self.current_estimate = estimate
+        self.confidence = min(0.95, total * 0.1)
     
     def get_estimate(self) -> Tuple[float, float]:
-        """Get current level estimate and confidence"""
         return self.current_estimate, self.confidence
-    
-    def get_predicted_level(self) -> int:
-        """Get final integer prediction"""
-        # Round to nearest integer
-        return round(self.current_estimate)
 
 
 class HybridLevelDetector:
-    """Combines rule-based and LLM analysis"""
-    
     def __init__(self, llm_client=None):
         self.rule_detector = LevelDetector()
         self.llm_client = llm_client
@@ -244,57 +142,28 @@ class HybridLevelDetector:
         self.rule_detector.add_exchange(tutor_msg, student_msg)
     
     def get_estimate(self, use_llm: bool = True) -> Tuple[float, float]:
-        """Get level estimate, optionally using LLM for better accuracy"""
-        rule_level, rule_conf = self.rule_detector.get_estimate()
+        rule_est, rule_conf = self.rule_detector.get_estimate()
         
-        if not use_llm or self.llm_client is None:
-            return rule_level, rule_conf
-        
-        # Use LLM for more accurate analysis (but only after turn 2 to have enough context)
-        if len(self.rule_detector.conversation_history) < 4:
-            return rule_level, rule_conf
-        
+        # Don't use LLM for very early turns or if rule confidence is high enough for extremes
+        if not use_llm or not self.llm_client or len(self.rule_detector.correctness_history) < 2:
+            return rule_est, rule_conf
+            
         try:
-            llm_result = self.llm_client.analyze_level(
-                self.rule_detector.conversation_history,
+            # Only send last 6 turns to keep context focused
+            llm_res = self.llm_client.analyze_level(
+                self.rule_detector.conversation_history[-6:], 
                 self.topic
             )
-            llm_level = llm_result.get("level", 3.0)
-            llm_conf = llm_result.get("confidence", 0.5)
+            llm_est = float(llm_res.get("level", 3.0))
+            self.llm_estimates.append(llm_est)
             
-            # Store LLM estimate for trend analysis
-            self.llm_estimates.append(llm_level)
+            # Combine: LLM 60%, Rules 40%
+            combined = (llm_est * 0.6) + (rule_est * 0.4)
             
-            # Combine: weight LLM higher as we get more data
-            turns = len(self.rule_detector.conversation_history) // 2
-            llm_weight = min(0.7, 0.4 + (turns * 0.1))  # 0.4 at turn 1, up to 0.7
-            rule_weight = 1.0 - llm_weight
+            # If rules say EXTME (1 or 5), trust rules more
+            if rule_est < 1.5: combined = min(combined, 1.5)
+            if rule_est > 4.5: combined = max(combined, 4.5)
             
-            combined_level = (llm_level * llm_weight) + (rule_level * rule_weight)
-            combined_conf = max(rule_conf, llm_conf)
-            
-            # Clamp to valid range
-            combined_level = max(1.0, min(5.0, combined_level))
-            
-            return combined_level, combined_conf
-        
-        except Exception as e:
-            print(f"LLM analysis failed: {e}")
-            return rule_level, rule_conf
-    
-    def get_predicted_level(self, use_llm: bool = True) -> int:
-        """Get final integer prediction with consistency check"""
-        level, conf = self.get_estimate(use_llm)
-        
-        # If we have multiple LLM estimates, check for consistency
-        if len(self.llm_estimates) >= 2:
-            recent_estimates = self.llm_estimates[-2:]
-            # If estimates are very different, trust the latest more
-            if abs(recent_estimates[0] - recent_estimates[1]) > 1.5:
-                level = recent_estimates[-1]  # Use most recent
-        
-        # Round to nearest integer
-        predicted = round(level)
-        
-        # Bounds check
-        return max(1, min(5, predicted))
+            return combined, max(rule_conf, 0.8)
+        except:
+            return rule_est, rule_conf
