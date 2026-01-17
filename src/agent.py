@@ -68,16 +68,6 @@ class TutoringAgent:
         while self.turn_number < max_turns:
             # Send message
             result = self.api.send_message(self.conversation_id, tutor_msg)
-            
-            # Handle API errors
-            if "error" in result:
-                print(f"\n⚠️ API Error: {result.get('error')}")
-                return None
-            
-            if "student_response" not in result:
-                print(f"\n⚠️ Missing student_response in API response: {result}")
-                return None
-            
             student_response = result["student_response"]
             self.turn_number = result["turn_number"]
             

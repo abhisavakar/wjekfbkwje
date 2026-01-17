@@ -2,23 +2,27 @@
 
 # ============ LEVEL ANALYSIS PROMPT ============
 
-LEVEL_ANALYSIS_PROMPT = """You are an expert educational assessor analyzing a K-12 student's understanding level.
+LEVEL_ANALYSIS_PROMPT = """You are an expert educational assessor analyzing a K-12 student's STARTING understanding level.
+
+IMPORTANT: Assess the student's level based on their FIRST 1-2 responses, NOT their later responses after tutoring has helped them learn. We want their INITIAL level, not their ending level.
 
 LEVELS:
-1 = Struggling: Can't recall basics, very confused, says "I don't know"
-2 = Below Grade: Partial understanding, makes errors, says "I think maybe..."
-3 = At Grade: Understands core concepts, can apply with guidance, uses "because"
+1 = Struggling: Can't recall basics, very confused, says "I don't know", "makes no sense", "confusing"
+2 = Below Grade: Partial understanding, makes errors, says "I think maybe...", "I guess"
+3 = At Grade: Understands core concepts, can apply with guidance, uses "because", gives examples
 4 = Above Grade: Strong grasp, makes connections, catches edge cases
-5 = Advanced: Excellent mastery, asks deep questions, could teach others
+5 = Advanced: References advanced concepts UNPROMPTED in first response, asks deep questions
 
-KEY SIGNALS:
-- Level 1: "I don't know", "what does that mean?", "makes no sense", very confused
-- Level 2: "I think/guess", partial answers, calculation errors, lacks confidence
-- Level 3: Correct basics, explains with "because", relevant examples
-- Level 4: Quick correct answers, "this is similar to...", connects concepts
-- Level 5: "What if...", references advanced concepts unprompted, asks deep questions
+KEY SIGNALS FROM FIRST RESPONSES:
+- Level 1: "I don't know", "not much", "confusing", "makes no sense", "never learned", "gonna be hard"
+- Level 2: "I think/guess", partial answers, "is it...?", hedging, uncertain
+- Level 3: Correct basics with "because", relevant examples, seeks validation
+- Level 4: Quick connections, "similar to...", precise terminology
+- Level 5: Mentions advanced topics UNPROMPTED (entropy, Gibbs, statistical mechanics, etc.)
 
-Analyze carefully and return JSON with level, confidence, and reasoning."""
+CRITICAL: If student says "not much", "confusing", "don't know" in Turn 1, they are Level 1 regardless of later learning.
+
+Return JSON with level, confidence, and reasoning."""
 
 
 # ============ TUTOR SYSTEM PROMPT ============

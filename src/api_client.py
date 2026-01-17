@@ -46,12 +46,7 @@ class KnowunityAPI:
             headers=self.headers,
             json={"student_id": student_id, "topic_id": topic_id}
         )
-        try:
-            return r.json()
-        except ValueError:
-            print(f"⚠️ Warning: Non-JSON response from tutoring evaluation (status {r.status_code})")
-            print(f"Response text: {r.text[:200]}...")
-            return {"error": "Invalid JSON response", "status_code": r.status_code, "raw": r.text}
+        return r.json()
     
     def send_message(self, conversation_id: str, tutor_message: str) -> Dict:
         """Send a message and get student response"""
@@ -63,12 +58,7 @@ class KnowunityAPI:
                 "tutor_message": tutor_message
             }
         )
-        try:
-            return r.json()
-        except ValueError:
-            print(f"⚠️ Warning: Non-JSON response from interact (status {r.status_code})")
-            print(f"Response text: {r.text[:200]}...")
-            return {"error": "Invalid JSON response", "status_code": r.status_code, "raw": r.text}
+        return r.json()
     
     # ============ EVALUATION (Auth Required) ============
     
@@ -93,12 +83,7 @@ class KnowunityAPI:
             json={"set_type": set_type},
             timeout=120  # LLM judge can be slow
         )
-        try:
-            return r.json()
-        except ValueError:
-            print(f"⚠️ Warning: Non-JSON response from tutoring evaluation (status {r.status_code})")
-            print(f"Response text: {r.text[:200]}...")
-            return {"error": "Invalid JSON response", "status_code": r.status_code, "raw": r.text}
+        return r.json()
     
     # ============ LEADERBOARDS ============
     
