@@ -32,10 +32,11 @@ def start_agent():
         
     set_type = request.json.get('set_type', 'mini_dev')
     
-    # clear queue
+    # Clear queue
     with event_queue.mutex:
         event_queue.queue.clear()
         
+    # Create agent
     current_agent = TutoringAgent(use_llm=True, event_callback=event_callback)
     
     # Run in background thread
@@ -63,6 +64,13 @@ def stream():
             yield f"data: {json.dumps(data)}\n\n"
     
     return Response(event_stream(), mimetype="text/event-stream")
+
+@app.route('/api/health')
+def health():
+    return jsonify({
+        "status": "healthy",
+        "agent_running": current_agent.running if current_agent else False
+    })
 
 if __name__ == '__main__':
     print("🚀 Flask Backend running on http://localhost:5000")
