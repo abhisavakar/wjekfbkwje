@@ -33,8 +33,8 @@ export default function Dashboard() {
   const [currentLevel, setCurrentLevel] = useState<number>(0);
   const [currentConfidence, setCurrentConfidence] = useState<number>(0);
   const [studentInfo, setStudentInfo] = useState<StudentInfo>({
-    name: "Student",
-    topic: "Ready to Learn",
+    name: "",
+    topic: "",
   });
 
   // Mobile Tab State
@@ -66,14 +66,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     const eventSource = new EventSource("http://localhost:5000/api/stream");
+
     eventSource.onmessage = (e) => {
       const data = JSON.parse(e.data);
       if (data.type === "log") {
         setLogs((prev) => [...prev.slice(-99), data]);
-        if (data.message.includes("Processing")) {
-          const match = data.message.match(/Processing (.*?) - (.*)/);
+        // Match format: "🎯 Starting: {topic_name} ({full_student_name})"
+        if (data.message.includes("Starting:")) {
+          const match = data.message.match(/Starting:\s*(.+?)\s*\((.+?)\)/);
           if (match) {
-            setStudentInfo({ name: match[1], topic: match[2] });
+            setStudentInfo({ name: match[2], topic: match[1] });
             setChatHistory([]);
             setEstimates([]);
             setCurrentLevel(0);
@@ -98,6 +100,12 @@ export default function Dashboard() {
         setCurrentConfidence(data.current_confidence);
       }
     };
+
+    eventSource.onerror = (error) => {
+      console.error("SSE Error:", error);
+      eventSource.close();
+    };
+
     return () => eventSource.close();
   }, []);
 
@@ -171,14 +179,14 @@ export default function Dashboard() {
           <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-white shrink-0 z-10">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center font-bold shadow-sm">
-                {studentInfo.name[0]}
+                {studentInfo.name ? studentInfo.name[0] : <User size={18} />}
               </div>
               <div>
                 <h2 className="font-bold text-slate-800 leading-tight">
-                  {studentInfo.name}
+                  {studentInfo.name || "No Active Session"}
                 </h2>
                 <p className="text-xs text-slate-500 font-medium">
-                  {studentInfo.topic}
+                  {studentInfo.topic || "Click 'Start Class' to begin"}
                 </p>
               </div>
             </div>
@@ -359,33 +367,39 @@ export default function Dashboard() {
               ref={logContainerRef}
               className="flex-1 overflow-y-auto p-4 space-y-1.5 font-mono text-[11px] custom-scrollbar"
             >
-              {logs.map((log, i) => (
-                <div
-                  key={i}
-                  className="flex gap-3 hover:bg-white/5 p-1 rounded transition-colors"
-                >
-                  <span className="text-slate-600 shrink-0 select-none">
-                    {new Date(log.timestamp * 1000).toLocaleTimeString([], {
-                      hour12: false,
-                      minute: "2-digit",
-                      second: "2-digit",
-                    })}
-                  </span>
-                  <span
-                    className={`${
-                      log.level === "error"
-                        ? "text-red-400 font-bold"
-                        : log.level === "success"
-                        ? "text-emerald-400 font-bold"
-                        : log.level === "system"
-                        ? "text-blue-400"
-                        : "text-slate-300"
-                    }`}
-                  >
-                    {log.message}
-                  </span>
+              {logs.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-slate-600 text-xs">
+                  No logs yet. Start a session to see activity.
                 </div>
-              ))}
+              ) : (
+                logs.map((log, i) => (
+                  <div
+                    key={i}
+                    className="flex gap-3 hover:bg-white/5 p-1 rounded transition-colors"
+                  >
+                    <span className="text-slate-600 shrink-0 select-none">
+                      {new Date(log.timestamp * 1000).toLocaleTimeString([], {
+                        hour12: false,
+                        minute: "2-digit",
+                        second: "2-digit",
+                      })}
+                    </span>
+                    <span
+                      className={`${
+                        log.level === "error"
+                          ? "text-red-400 font-bold"
+                          : log.level === "success"
+                          ? "text-emerald-400 font-bold"
+                          : log.level === "system"
+                          ? "text-blue-400"
+                          : "text-slate-300"
+                      }`}
+                    >
+                      {log.message}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 

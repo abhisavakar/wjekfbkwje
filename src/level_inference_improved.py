@@ -1,4 +1,4 @@
-"""Level Detection v3: LLM-First with Rule Validation"""
+"""Level Detection v4.0: Extreme Trust Protocol"""
 
 import re
 from typing import Dict, Tuple, Optional
@@ -6,7 +6,6 @@ from typing import Dict, Tuple, Optional
 class RuleValidator:
     """Fast rule-based validation to catch extreme cases"""
     
-    # Critical signals for extreme levels
     EXTREME_CONFUSION = [
         r"i don'?t know", r"no idea", r"what (is|does|are|means?)", 
         r"never (learned|heard)", r"totally lost", r"makes no sense",
@@ -21,31 +20,24 @@ class RuleValidator:
     ]
     
     def analyze(self, student_response: str) -> Dict:
-        """Quick analysis for extreme signal detection"""
         response_lower = student_response.lower()
-        
-        # Count extreme signals
         confusion_signals = sum(1 for p in self.EXTREME_CONFUSION if re.search(p, response_lower))
         mastery_signals = sum(1 for p in self.EXTREME_MASTERY if re.search(p, response_lower))
-        word_count = len(response_lower.split())
         
         return {
             "confusion": confusion_signals,
-            "mastery": mastery_signals,
-            "word_count": word_count
+            "mastery": mastery_signals
         }
     
     def get_constraint(self, analysis: Dict) -> Optional[Tuple[float, float]]:
-        """Returns (min, max) constraint based on accumulated signals"""
-        if analysis["confusion"] >= 2:
-            return (1.0, 2.5)  # Hard cap on level if confused
+        # If student says "I don't know", HARD CAP at 1.5. No exceptions.
+        if analysis["confusion"] >= 1:
+            return (1.0, 1.5) 
         if analysis["mastery"] >= 2:
-            return (4.0, 5.0)  # Floor on level if using advanced terms
+            return (4.5, 5.0)
         return None
 
 class LLMFirstDetector:
-    """Primary detector using LLM with rule validation"""
-    
     def __init__(self, llm_client):
         self.llm_client = llm_client
         self.validator = RuleValidator()
@@ -61,7 +53,6 @@ class LLMFirstDetector:
         self.conversation_history.append({"role": "student", "content": student_msg})
     
     def get_estimate(self, turn_number: int) -> Tuple[float, float]:
-        # Context window management
         context = self.conversation_history if turn_number <= 3 else self.conversation_history[-8:]
         
         # 1. LLM Analysis
@@ -72,7 +63,7 @@ class LLMFirstDetector:
         except Exception:
             level, conf = 3.0, 0.0
         
-        # 2. Rule Validation
+        # 2. Rule Validation (Safety Net)
         last_msg = self.conversation_history[-1]["content"]
         analysis = self.validator.analyze(last_msg)
         constraint = self.validator.get_constraint(analysis)
@@ -80,26 +71,45 @@ class LLMFirstDetector:
         if constraint:
             min_l, max_l = constraint
             level = max(min_l, min(max_l, level))
-        
-        # 3. Stabilization (Weighted Average)
+            # If rules triggered, boost confidence in that extreme
+            conf = 0.95 
+
+        # 3. EXTREME TRUST PROTOCOL (The Fix for MSE)
+        # If we are super confident it's an extreme level, DO NOT average with history.
+        # This prevents "drifting to the middle".
+        is_extreme = (level <= 1.5 or level >= 4.5)
+        if is_extreme and conf > 0.9:
+            self.estimates_history.append({"level": level, "confidence": conf})
+            return level, conf
+
+        # 4. Inertia (Only applies to non-extremes)
         if self.estimates_history:
-            prev = self.estimates_history[-1]["level"]
-            # Allow max 1.0 shift per turn
-            if abs(level - prev) > 1.0:
-                level = prev + (1.0 if level > prev else -1.0)
+            prev_level = self.estimates_history[-1]["level"]
+            avg_history = sum(e["level"] for e in self.estimates_history) / len(self.estimates_history)
+            
+            if abs(level - avg_history) > 1.0:
+                if conf < 0.9:
+                    level = (level + avg_history * 2) / 3
         
         self.estimates_history.append({"level": level, "confidence": conf})
         return level, conf
     
     def get_final_prediction(self) -> int:
         if not self.estimates_history: return 3
-        # Median of last 3 estimates for stability
-        recent = sorted([e["level"] for e in self.estimates_history[-3:]])
-        final = recent[len(recent)//2]
         
-        # Conservative rounding
-        if final < 1.4: return 1
-        if final < 2.4: return 2
-        if final < 3.6: return 3
-        if final < 4.6: return 4
+        # If the last 2 turns were definitely Level 1, predict Level 1 (ignore early guesses)
+        last_3 = [e["level"] for e in self.estimates_history[-3:]]
+        avg_last_3 = sum(last_3) / len(last_3)
+        
+        if avg_last_3 <= 1.5: return 1
+        if avg_last_3 >= 4.5: return 5
+        
+        # Otherwise use full average
+        levels = [e["level"] for e in self.estimates_history]
+        avg_level = sum(levels) / len(levels)
+        
+        if avg_level < 1.6: return 1
+        if avg_level < 2.6: return 2
+        if avg_level < 3.6: return 3
+        if avg_level < 4.6: return 4
         return 5

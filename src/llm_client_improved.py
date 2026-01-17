@@ -10,14 +10,14 @@ class LLMClientV3:
     
     def __init__(self):
         self.client = openai.OpenAI(api_key=config.OPENAI_API_KEY)
-        self.model = "gpt-4o"  # Fast and high quality
+        self.model = "gpt-5.2"  # Fast and high quality
     
     def chat(self, system_prompt: str, user_message: str, max_tokens: int = 1024, temperature: float = 0.7) -> str:
         """Send a message to OpenAI and get response"""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=max_tokens,
+                max_completion_tokens=max_tokens,
                 temperature=temperature,
                 messages=[
                     {"role": "system", "content": system_prompt},

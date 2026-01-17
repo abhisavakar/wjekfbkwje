@@ -50,14 +50,18 @@ class KnowunityAPI:
         return r.json()
     
     def send_message(self, conversation_id: str, tutor_message: str) -> Dict:
+        payload = {
+            "conversation_id": conversation_id,
+            "tutor_message": tutor_message,
+            "message": tutor_message
+        }
         r = requests.post(
             f"{self.base_url}/interact",
             headers=self.headers,
-            json={
-                "conversation_id": conversation_id,
-                "tutor_message": tutor_message
-            }
+            json=payload
         )
+        if r.status_code == 422:
+            print(f"⚠️  422 Unprocessable Entity: {r.text[:500]}")
         r.raise_for_status()
         return r.json()
     
