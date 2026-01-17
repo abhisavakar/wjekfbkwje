@@ -1,4 +1,4 @@
-"""Generate tutoring responses based on student level"""
+"""Generate tutoring responses based on student level - SIMPLIFIED"""
 
 from typing import Optional
 from prompts import get_opening_message
@@ -73,7 +73,7 @@ class TutorGenerator:
         
         elif phase == "close":
             templates = {
-                1: f"Great work today! You made real progress with {topic}. Keep practicing the basics and you'll get even stronger! 💪",
+                1: f"Great work today! You made real progress with {topic}. Keep practicing and you'll get even stronger! 💪",
                 2: f"Nice job! You're getting the hang of {topic}. Keep practicing those steps! 🌟",
                 3: f"Good session! You have a solid grasp of {topic}. Keep building on it!",
                 4: f"Excellent work! You really understand {topic} well. Keep challenging yourself! 🎉",

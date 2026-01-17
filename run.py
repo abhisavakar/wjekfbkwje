@@ -11,11 +11,14 @@ import sys
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from agent import TutoringAgent, run_multiple_sessions
+from agent import TutoringAgent
 
 
 def main():
     parser = argparse.ArgumentParser(description='AI Tutoring Agent for Knowunity Challenge')
+    parser.add_argument('--set', type=str, choices=['mini_dev', 'dev', 'eval'], 
+                       help='Run on a specific evaluation set')
+    parser.add_argument('--no-llm', action='store_true', help='Disable LLM (use templates)')
     parser.add_argument('--sessions', type=int, default=1, help='Number of sessions to run')
     parser.add_argument('--topic', type=str, default=None, help='Topic for the session')
     parser.add_argument('--api-key', type=str, 
@@ -37,6 +40,26 @@ def main():
         test_api_connection(args.api_key)
         return
     
+    # If --set is provided, use the agent.py workflow
+    if args.set:
+        agent = TutoringAgent(use_llm=not args.no_llm)
+        
+        # Run all sessions
+        print(f"🚀 Running sessions for {args.set} set...")
+        predictions = agent.run_all_sessions(args.set, verbose=not args.quiet)
+        
+        # Submit and evaluate
+        print(f"\n📤 Submitting {len(predictions)} predictions...")
+        results = agent.submit_and_evaluate(predictions, args.set)
+        
+        print(f"\n{'='*60}")
+        print("FINAL RESULTS")
+        print(f"{'='*60}")
+        print(f"MSE Score: {results['mse']['mse_score']}")
+        print(f"Tutoring Score: {results['tutoring']['score']}")
+        print(f"{'='*60}")
+        return
+    
     if args.sessions == 1:
         # Run single session
         print(f"Starting session... (Topic: {args.topic or 'random'})")
@@ -51,12 +74,7 @@ def main():
             print(json.dumps(agent.get_assessment_summary(), indent=2))
     else:
         # Run multiple sessions
-        topics = [args.topic] if args.topic else None
-        results = run_multiple_sessions(
-            api_key=args.api_key,
-            num_sessions=args.sessions,
-            topics=topics
-        )
+        print("⚠️  Multiple sessions mode not yet implemented. Use --set instead.")
     
     print("\n✅ Done!")
 

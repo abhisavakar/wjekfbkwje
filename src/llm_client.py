@@ -1,18 +1,21 @@
-"""OpenAI API Client for intelligent responses"""
+"""OpenAI API Client - GPT-5.2 with tuned temperature"""
 
 import openai
+import json
+import re
 import config
 
 class LLMClient:
     def __init__(self):
         self.client = openai.OpenAI(api_key=config.OPENAI_API_KEY)
-        self.model = "gpt-4o"  # Fast and capable, can also use "gpt-4-turbo" or "gpt-4o-mini"
+        self.model = "gpt-5.2"  # Latest model
     
-    def chat(self, system_prompt: str, user_message: str) -> str:
+    def chat(self, system_prompt: str, user_message: str, temperature: float = 0.4) -> str:
         """Send a message to OpenAI and get response"""
         response = self.client.chat.completions.create(
             model=self.model,
-            max_tokens=1024,
+            max_completion_tokens=1024,
+            temperature=temperature,  # Lower = more consistent, natural
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
@@ -29,27 +32,27 @@ class LLMClient:
             for m in conversation_history
         ])
         
-        user_msg = f"""
-Topic: {topic}
+        user_msg = f"""Topic: {topic}
 
 Conversation:
 {history_text}
 
-Analyze the student's understanding level (1-5) based on their responses.
-Return ONLY a JSON object with:
-- "level": (float between 1.0 and 5.0)
-- "confidence": (float between 0.0 and 1.0)
-- "reasoning": (brief explanation)
-"""
+Analyze the student's understanding level (1-5).
+Return ONLY JSON: {{"level": X, "confidence": Y, "reasoning": "brief"}}"""
         
-        response = self.chat(LEVEL_ANALYSIS_PROMPT, user_msg)
+        response = self.chat(LEVEL_ANALYSIS_PROMPT, user_msg, temperature=0.2)
         
         # Parse JSON from response
-        import json
-        import re
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group())
+        try:
+            json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+                result["level"] = float(result.get("level", 3.0))
+                result["confidence"] = float(result.get("confidence", 0.5))
+                return result
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"JSON parse error: {e}")
+        
         return {"level": 3.0, "confidence": 0.5, "reasoning": "Could not parse"}
     
     def generate_tutor_message(
@@ -58,9 +61,9 @@ Return ONLY a JSON object with:
         student_level: int,
         topic: str,
         turn_number: int,
-        phase: str  # "assess", "tutor", or "close"
+        phase: str
     ) -> str:
-        """Generate a tutoring message appropriate for the student's level"""
+        """Generate a tutoring message"""
         from prompts import TUTOR_SYSTEM_PROMPT, get_phase_instructions
         
         history_text = "\n".join([
@@ -68,21 +71,44 @@ Return ONLY a JSON object with:
             for m in conversation_history
         ])
         
+        # Detect student's language from their messages
+        student_messages = [m['content'] for m in conversation_history if m['role'] == 'student']
+        language_hint = ""
+        if student_messages:
+            last_student_msg = student_messages[-1].lower()
+            # Simple detection: check for common German words
+            german_indicators = ['ich', 'und', 'das', 'ist', 'nicht', 'für', 'auch', 'aber', 'wenn', 'kann']
+            german_count = sum(1 for word in german_indicators if word in last_student_msg)
+            if german_count >= 2:
+                language_hint = "The student is writing in GERMAN. Respond in German."
+            else:
+                language_hint = "The student is writing in ENGLISH. Respond in English only."
+        
         phase_instructions = get_phase_instructions(phase, student_level)
         
-        user_msg = f"""
-Topic: {topic}
+        # Response length guidance based on level
+        length_hint = ""
+        if student_level <= 2:
+            length_hint = "Keep your response SHORT (3-5 sentences max). Simple and clear."
+        elif student_level == 5:
+            length_hint = "Keep your response CONCISE. Ask questions, don't lecture. No walls of equations."
+        
+        user_msg = f"""Topic: {topic}
 Student Level: {student_level}
 Turn: {turn_number}/10
 Phase: {phase}
+
+{language_hint}
+{length_hint}
 
 Conversation so far:
 {history_text}
 
 {phase_instructions}
 
-Generate the next tutor message. Be natural, conversational, and appropriate for Level {student_level}.
-Return ONLY the message text, nothing else.
-"""
+Generate the next tutor message. Be warm, natural, and helpful.
+Ask ONE question at a time (not multiple).
+Return ONLY the message text."""
         
-        return self.chat(TUTOR_SYSTEM_PROMPT, user_msg)
+        # Use slightly higher temperature for more natural responses
+        return self.chat(TUTOR_SYSTEM_PROMPT, user_msg, temperature=0.5)

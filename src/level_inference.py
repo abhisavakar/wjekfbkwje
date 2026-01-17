@@ -1,4 +1,4 @@
-"""Level detection from conversation analysis"""
+"""Level detection from conversation analysis - SIMPLIFIED"""
 
 import re
 from typing import Dict, List, Tuple
@@ -17,6 +17,7 @@ class LevelDetector:
                 r"makes no sense",
                 r"totally lost",
                 r"huh\?",
+                r"basically nothing",
             ],
             "weak": [
                 r"confus",
