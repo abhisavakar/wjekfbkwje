@@ -8,14 +8,14 @@ import re
 class LLMClient:
     def __init__(self):
         self.client = openai.OpenAI(api_key=config.OPENAI_API_KEY)
-        self.model = "gpt-4o"  # Fast and capable
+        self.model = "gpt-4o"
     
     def chat(self, system_prompt: str, user_message: str, max_tokens: int = 1024) -> str:
         """Send a message to OpenAI and get response"""
         response = self.client.chat.completions.create(
             model=self.model,
             max_tokens=max_tokens,
-            temperature=0.7,  # Slightly creative but consistent
+            temperature=0.7,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
@@ -27,7 +27,6 @@ class LLMClient:
         """Analyze conversation to determine student level with high accuracy"""
         from prompts_improved import LEVEL_ANALYSIS_PROMPT
         
-        # Format conversation with clear structure
         history_text = ""
         for i, msg in enumerate(conversation_history):
             role = "TUTOR" if msg['role'] == 'tutor' else "STUDENT"
@@ -55,11 +54,9 @@ Return ONLY a valid JSON object:
         try:
             response = self.chat(LEVEL_ANALYSIS_PROMPT, user_msg, max_tokens=500)
             
-            # Parse JSON from response
             json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
             if json_match:
                 result = json.loads(json_match.group())
-                # Validate and clamp values
                 result["level"] = max(1.0, min(5.0, float(result.get("level", 3.0))))
                 result["confidence"] = max(0.0, min(1.0, float(result.get("confidence", 0.5))))
                 return result
@@ -80,23 +77,24 @@ Return ONLY a valid JSON object:
         """Generate high-quality tutoring message appropriate for the student's level"""
         from prompts_improved import TUTOR_SYSTEM_PROMPT, get_phase_instructions
         
-        # Format conversation
         history_text = ""
         for msg in conversation_history:
             role = "TUTOR" if msg['role'] == 'tutor' else "STUDENT"
             history_text += f"{role}: {msg['content']}\n"
         
-        # Get last student response for context
         last_student = ""
         for msg in reversed(conversation_history):
             if msg['role'] == 'student':
                 last_student = msg['content']
                 break
         
-        # Get phase instructions
-        phase_instructions = get_phase_instructions(phase, student_level)
+        # Handle the special 'close_with_answer' phase
+        actual_phase = "close" if phase == "close_with_answer" else phase
+        phase_instructions = get_phase_instructions(actual_phase, student_level)
         
-        # Build context-aware prompt
+        if phase == "close_with_answer":
+            phase_instructions += "\nCRITICAL: The student asked a final question. ANSWER IT briefly and clearly BEFORE providing the closing summary."
+        
         context_note = ""
         if session_context and session_context.get("student_statements"):
             first_statement = session_context["student_statements"][0]
@@ -105,7 +103,7 @@ Return ONLY a valid JSON object:
         user_msg = f"""Topic: {topic}
 Student Level: {student_level} (1=struggling, 2=below grade, 3=at grade, 4=above grade, 5=advanced)
 Current Turn: {turn_number}/10
-Phase: {phase}
+Phase: {actual_phase}
 
 Full Conversation:
 {history_text}
@@ -119,23 +117,19 @@ Generate the next tutor message. Remember:
 - Match the difficulty to Level {student_level}
 - Be warm, encouraging, and specific
 - Reference what the student actually said
-- {"Ask diagnostic questions" if phase == "assess" else "Teach appropriately" if phase == "tutor" else "End with specific, positive summary"}
 - Keep it natural and conversational
-- {"2-3 sentences" if phase == "close" else "1-3 sentences" if phase == "assess" else "2-4 sentences"}
+- {"2-3 sentences" if actual_phase == "close" else "1-3 sentences" if actual_phase == "assess" else "2-4 sentences"}
 
 Return ONLY the message text (no labels, no metadata):"""
         
         try:
             response = self.chat(TUTOR_SYSTEM_PROMPT, user_msg, max_tokens=300)
-            # Clean up any formatting artifacts
             response = response.strip()
-            # Remove any "TUTOR:" prefix if model added it
             response = re.sub(r'^(TUTOR|Tutor|Assistant):\s*', '', response, flags=re.IGNORECASE)
             return response
         except Exception as e:
             print(f"Tutor message generation error: {e}")
-            # Fallback
-            if phase == "close":
+            if actual_phase == "close":
                 return f"Great work today! You've made real progress with {topic}. Keep learning! 🌟"
             else:
                 return f"Can you tell me more about your thinking on {topic}?"

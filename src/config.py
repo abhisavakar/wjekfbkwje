@@ -1,11 +1,16 @@
 """Configuration for the AI Tutoring Agent"""
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Knowunity API
-KNOWUNITY_API_KEY = "sk_team_Ba30FbMKkpg7Ups5lyjkZiNfxFIA0CVD"
+KNOWUNITY_API_KEY = os.getenv("KNOWUNITY_API_KEY")
 KNOWUNITY_BASE_URL = "https://knowunity-agent-olympics-2026-api.vercel.app"
 
 # OpenAI API (for intelligent responses)
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Agent Settings
 MAX_TURNS = 10

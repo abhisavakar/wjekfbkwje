@@ -63,39 +63,41 @@ class TutoringAgent:
             student_response = result["student_response"]
             turn_number = result["turn_number"]
             
-            # --- PRINT CHAT TO CONSOLE (Requested Feature) ---
             print(f"\n[Turn {turn_number}]")
             print(f"TUTOR: {tutor_msg}")
             print(f"STUDENT: {student_response}")
-            # -------------------------------------------------
 
             # 2. Update State
             self.conversation_history.append({"role": "tutor", "content": tutor_msg})
             self.conversation_history.append({"role": "student", "content": student_response})
             self.detector.add_exchange(tutor_msg, student_response)
             
-            # 3. Analyze
-            level_est, confidence = self.detector.get_estimate(use_llm=self.llm is not None)
+            # 3. Analyze (Now with Sentiment)
+            level_est, confidence, sentiment = self.detector.get_estimate(use_llm=self.llm is not None)
             
-            # Standard rounding
             self.predicted_level = int(level_est + 0.5)
             estimates_history.append({"level": level_est, "confidence": confidence})
             
-            self.log(f"Turn {turn_number}: Est={level_est:.2f} Conf={confidence:.0%}")
+            self.log(f"Turn {turn_number}: Est={level_est:.2f} Conf={confidence:.0%} Sent={sentiment}")
             self.emit_state(self.conversation_history, estimates_history, level_est, confidence)
             
             if result.get("is_complete", False): break
                 
-            # 4. Generate Response
+            # 4. Generate Response (Now with Confidence & Sentiment)
             tutor_msg = self.generator.generate_response(
-                self.conversation_history, self.predicted_level, topic_name, turn_number + 1, student_response
+                self.conversation_history, 
+                self.predicted_level, 
+                topic_name, 
+                turn_number + 1, 
+                student_response,
+                confidence=confidence,
+                sentiment=sentiment
             )
             time.sleep(0.5)
 
-        # --- FINAL PREDICTION LOGIC ---
-        final_raw, final_conf = self.detector.get_estimate(use_llm=self.llm is not None)
+        # --- FINAL PREDICTION ---
+        final_raw, final_conf, _ = self.detector.get_estimate(use_llm=self.llm is not None)
         
-        # Strict Clamping for MSE=0
         if final_raw < 1.8: final_level = 1
         elif final_raw > 4.2: final_level = 5
         else: final_level = int(final_raw + 0.5)

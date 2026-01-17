@@ -1,18 +1,21 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
+
 import {
   Play,
   Square,
-  Terminal,
   User,
   Bot,
   Activity,
-  Award,
-  BarChart3,
+  BarChart2,
+  Terminal,
+  MessageCircle,
   Zap,
-  RefreshCw,
-  Trophy,
 } from "lucide-react";
 import {
   AgentStatus,
@@ -30,96 +33,88 @@ export default function Dashboard() {
   const [currentLevel, setCurrentLevel] = useState<number>(0);
   const [currentConfidence, setCurrentConfidence] = useState<number>(0);
   const [studentInfo, setStudentInfo] = useState<StudentInfo>({
-    name: "Ready",
-    topic: "Waiting to start...",
+    name: "Student",
+    topic: "Ready to Learn",
   });
+
+  // Mobile Tab State
+  const [activeTab, setActiveTab] = useState<"chat" | "stats">("chat");
   const [finalScores, setFinalScores] = useState<{
     mse: string | null;
     tutoring: string | null;
   }>({ mse: null, tutoring: null });
 
-  const logEndRef = useRef<HTMLDivElement>(null);
+  // Refs for auto-scrolling
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Derived state for Visual Clamping (Prevents UI from showing inflated scores)
-  const displayLevel = (() => {
-    // Safety: If level is high (>4) but confidence is low (<50%), visually dampen it
-    if (currentLevel > 4.0 && currentConfidence < 0.5) return 3.5;
-    return currentLevel;
-  })();
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [logs]);
+
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [chatHistory]);
 
   useEffect(() => {
     const eventSource = new EventSource("http://localhost:5000/api/stream");
-
     eventSource.onmessage = (e) => {
       const data = JSON.parse(e.data);
-
       if (data.type === "log") {
-        const logData = data as LogMessage;
-        // Limit logs to last 100 to prevent DOM lag
-        setLogs((prev) => [...prev.slice(-99), logData]);
-
-        if (logData.message.includes("Processing")) {
-          const match = logData.message.match(/Processing (.*?) - (.*)/);
+        setLogs((prev) => [...prev.slice(-99), data]);
+        if (data.message.includes("Processing")) {
+          const match = data.message.match(/Processing (.*?) - (.*)/);
           if (match) {
             setStudentInfo({ name: match[1], topic: match[2] });
             setChatHistory([]);
             setEstimates([]);
             setCurrentLevel(0);
             setCurrentConfidence(0);
-            setFinalScores({ mse: null, tutoring: null }); // Reset scores on new student
+            setFinalScores({ mse: null, tutoring: null });
           }
         }
-
-        if (logData.message.includes("FINAL_MSE_SCORE:")) {
-          setFinalScores((prev) => ({
-            ...prev,
-            mse: logData.message.split(":")[1].trim(),
+        if (data.message.includes("FINAL_MSE_SCORE:"))
+          setFinalScores((p) => ({
+            ...p,
+            mse: data.message.split(":")[1].trim(),
           }));
-        }
-        if (logData.message.includes("FINAL_TUTORING_SCORE:")) {
-          setFinalScores((prev) => ({
-            ...prev,
-            tutoring: logData.message.split(":")[1].trim(),
+        if (data.message.includes("FINAL_TUTORING_SCORE:"))
+          setFinalScores((p) => ({
+            ...p,
+            tutoring: data.message.split(":")[1].trim(),
           }));
-        }
       } else if (data.type === "state_update") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const stateData = data as any;
-        setChatHistory(stateData.history);
-        setEstimates(stateData.estimates);
-        setCurrentLevel(stateData.current_level);
-        setCurrentConfidence(stateData.current_confidence);
+        setChatHistory(data.history);
+        setEstimates(data.estimates);
+        setCurrentLevel(data.current_level);
+        setCurrentConfidence(data.current_confidence);
       }
     };
-
     return () => eventSource.close();
   }, []);
-
-  // Smart Auto-scroll
-  useEffect(() => {
-    if (logs.length > 0)
-      logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
-
-  useEffect(() => {
-    if (chatHistory.length > 0)
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatHistory]);
 
   const toggleAgent = async () => {
     if (status === "idle") {
       setStatus("running");
       setLogs([]);
       setFinalScores({ mse: null, tutoring: null });
+      setActiveTab("chat");
       try {
         await fetch("http://localhost:5000/api/start", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ set_type: "mini_dev" }),
         });
-      } catch (error) {
-        console.error("Failed to start agent:", error);
+      } catch (e) {
+        console.error(e);
         setStatus("idle");
       }
     } else {
@@ -134,131 +129,117 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="h-screen bg-gray-50 text-gray-900 font-sans flex flex-col overflow-hidden">
-      {/* Header - Fixed Height */}
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shrink-0 shadow-sm z-20">
-        <div className="flex items-center gap-3">
-          <div className="bg-knowunity-green p-2 rounded-lg text-white">
-            <Zap size={20} fill="currentColor" />
-          </div>
-          <div>
-            <h1 className="font-bold text-lg leading-tight text-gray-900">
-              Knowunity Tutor Agent
-            </h1>
-            <p className="text-xs text-gray-500 font-medium">
-              LIVE MONITORING DASHBOARD
-            </p>
-          </div>
+    <div className="flex flex-col h-[100dvh] bg-slate-50 font-sans text-slate-800 overflow-hidden">
+      {/* 1. Navbar */}
+      <nav className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shrink-0 shadow-sm z-20">
+        <div className="flex items-center gap-1">
+          <span className="font-black text-2xl tracking-tighter text-knowunity-green">
+            Knowunity
+          </span>
+          <span className="bg-slate-100 text-slate-500 text-[10px] px-1.5 py-0.5 rounded ml-2 font-bold uppercase tracking-wider">
+            Agent
+          </span>
         </div>
-        <div className="flex items-center gap-4">
-          {/* Live Score Ticker */}
-          {(finalScores.mse || finalScores.tutoring) && (
-            <div className="flex gap-4 mr-4 animate-in fade-in slide-in-from-top-4 duration-500">
-              <div className="px-4 py-1.5 bg-blue-50 border border-blue-200 rounded-lg flex flex-col items-center shadow-sm">
-                <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wide">
-                  MSE Score
-                </span>
-                <span className="font-mono font-bold text-blue-700">
-                  {finalScores.mse ? Number(finalScores.mse).toFixed(4) : "..."}
-                </span>
-              </div>
-              <div className="px-4 py-1.5 bg-purple-50 border border-purple-200 rounded-lg flex flex-col items-center shadow-sm">
-                <span className="text-[10px] font-bold text-purple-500 uppercase tracking-wide">
-                  Tutoring Score
-                </span>
-                <span className="font-mono font-bold text-purple-700">
-                  {finalScores.tutoring || "-"}/5
-                </span>
-              </div>
-            </div>
+
+        <button
+          onClick={toggleAgent}
+          className={`flex items-center gap-2 px-5 py-2 rounded-full font-bold text-sm transition-all shadow-md active:scale-95 ${
+            status === "running"
+              ? "bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
+              : "bg-knowunity-green text-white hover:bg-emerald-600"
+          }`}
+        >
+          {status === "running" ? (
+            <Square size={14} fill="currentColor" />
+          ) : (
+            <Play size={14} fill="currentColor" />
           )}
+          <span>{status === "running" ? "End Session" : "Start Class"}</span>
+        </button>
+      </nav>
 
-          <div
-            className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide flex items-center gap-2 transition-colors ${
-              status === "running"
-                ? "bg-green-100 text-green-700"
-                : "bg-gray-100 text-gray-600"
-            }`}
-          >
-            <div
-              className={`w-2 h-2 rounded-full ${
-                status === "running"
-                  ? "bg-green-500 animate-pulse"
-                  : "bg-gray-400"
-              }`}
-            ></div>
-            {status === "running" ? "Active" : "Idle"}
-          </div>
-          <button
-            onClick={toggleAgent}
-            className={`flex items-center gap-2 px-5 py-2 rounded-lg font-semibold text-sm transition-all text-white shadow-sm hover:shadow-md active:scale-95 ${
-              status === "running"
-                ? "bg-red-500 hover:bg-red-600"
-                : "bg-knowunity-green hover:bg-knowunity-dark"
-            }`}
-          >
-            {status === "running" ? (
-              <>
-                <Square size={16} fill="currentColor" /> Stop Session
-              </>
-            ) : (
-              <>
-                <Play size={16} fill="currentColor" /> Start Evaluation
-              </>
-            )}
-          </button>
-        </div>
-      </header>
-
-      {/* Main Content - Flex Grow */}
-      <main className="flex-1 p-6 grid grid-cols-12 gap-6 min-h-0">
-        {/* LEFT: Live Conversation */}
-        <section className="col-span-12 lg:col-span-7 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden h-full">
-          <div className="p-4 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center shrink-0">
+      {/* 2. Main Area */}
+      <main className="flex-1 overflow-hidden relative flex flex-col lg:grid lg:grid-cols-12 lg:gap-6 lg:p-6 bg-slate-50">
+        {/* --- CHAT SECTION --- */}
+        <section
+          className={`
+          ${activeTab === "chat" ? "flex" : "hidden"} 
+          lg:flex col-span-7 flex-col h-full bg-white lg:rounded-2xl lg:shadow-sm lg:border border-slate-200 overflow-hidden
+        `}
+        >
+          {/* Header */}
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-white shrink-0 z-10">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-knowunity-dark font-bold text-lg border border-green-200">
+              <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center font-bold shadow-sm">
                 {studentInfo.name[0]}
               </div>
               <div>
-                <h2 className="font-bold text-sm text-gray-900">
+                <h2 className="font-bold text-slate-800 leading-tight">
                   {studentInfo.name}
                 </h2>
-                <p className="text-xs text-gray-500 font-medium">
+                <p className="text-xs text-slate-500 font-medium">
                   {studentInfo.topic}
                 </p>
               </div>
             </div>
-            <div className="text-xs font-mono text-gray-400 bg-white px-2 py-1 rounded border border-gray-100">
-              Turn {Math.floor(chatHistory.length / 2)}
+
+            {/* Live Stats HUD */}
+            <div className="flex items-center gap-4 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
+              <div className="flex flex-col items-end">
+                <span className="text-[9px] uppercase font-bold text-slate-400">
+                  Level
+                </span>
+                <span className="text-sm font-black text-slate-700">
+                  {currentLevel > 0 ? currentLevel.toFixed(1) : "-"}
+                </span>
+              </div>
+              <div className="w-px h-6 bg-slate-200"></div>
+              <div className="flex flex-col items-end">
+                <span className="text-[9px] uppercase font-bold text-slate-400">
+                  Conf
+                </span>
+                <span
+                  className={`text-sm font-black ${
+                    currentConfidence > 0.8
+                      ? "text-emerald-500"
+                      : "text-amber-500"
+                  }`}
+                >
+                  {(currentConfidence * 100).toFixed(0)}%
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-5 space-y-6 bg-white scroll-smooth">
+          {/* Messages Container */}
+          <div
+            ref={chatContainerRef}
+            className="flex-1 overflow-y-auto p-4 space-y-6 bg-slate-50/30 custom-scrollbar scroll-smooth"
+          >
             {chatHistory.length === 0 && (
-              <div className="h-full flex flex-col items-center justify-center text-gray-300 gap-3">
-                <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center">
-                  <RefreshCw
-                    size={32}
-                    className={status === "running" ? "animate-spin" : ""}
-                  />
+              <div className="h-full flex flex-col items-center justify-center opacity-40 gap-3">
+                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center">
+                  <Zap size={32} className="text-slate-400" />
                 </div>
-                <p className="text-sm font-medium">
-                  Waiting for active session...
+                <p className="text-slate-500 font-medium">
+                  Waiting for student connection...
                 </p>
               </div>
             )}
+
             {chatHistory.map((msg, i) => (
               <div
                 key={i}
-                className={`flex gap-3 ${
-                  msg.role === "tutor" ? "flex-row-reverse" : ""
-                } animate-in fade-in slide-in-from-bottom-2 duration-300`}
+                className={`flex gap-3 max-w-[95%] lg:max-w-[85%] ${
+                  msg.role === "tutor" ? "ml-auto flex-row-reverse" : ""
+                } animate-in fade-in slide-in-from-bottom-2 duration-300 relative group`}
               >
+                {/* Avatar */}
                 <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border ${
+                  className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm border ${
                     msg.role === "tutor"
-                      ? "bg-knowunity-green text-white border-transparent"
-                      : "bg-gray-100 text-gray-500 border-gray-200"
+                      ? "bg-knowunity-green text-white border-emerald-500"
+                      : "bg-white border-slate-200 text-slate-400"
                   }`}
                 >
                   {msg.role === "tutor" ? (
@@ -267,125 +248,123 @@ export default function Dashboard() {
                     <User size={16} />
                   )}
                 </div>
-                <div
-                  className={`max-w-[85%] p-3.5 rounded-2xl text-sm leading-relaxed shadow-sm ${
-                    msg.role === "tutor"
-                      ? "bg-knowunity-green text-white rounded-tr-none"
-                      : "bg-gray-50 text-gray-800 rounded-tl-none border border-gray-100"
-                  }`}
-                >
-                  {msg.content}
+
+                {/* Bubble */}
+                <div className="flex flex-col">
+                  {/* Turn Indicator (NEW) */}
+                  <span
+                    className={`text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wide ${
+                      msg.role === "tutor" ? "text-right" : "text-left"
+                    }`}
+                  >
+                    Turn {Math.floor(i / 2) + 1}
+                  </span>
+
+                  <div
+                    className={`px-4 py-3 text-[15px] rounded-2xl shadow-sm leading-relaxed ${
+                      msg.role === "tutor"
+                        ? "bg-knowunity-green text-white rounded-tr-none"
+                        : "bg-white border border-slate-200 text-slate-700 rounded-tl-none"
+                    }`}
+                  >
+                    <ReactMarkdown
+                      remarkPlugins={[remarkMath]}
+                      rehypePlugins={[rehypeKatex]}
+                      components={{
+                        p: ({ node, ...props }) => (
+                          <p className="mb-0 leading-relaxed" {...props} />
+                        ),
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
                 </div>
               </div>
             ))}
-            <div ref={chatEndRef} />
+            <div ref={chatEndRef} className="h-1" />
           </div>
         </section>
 
-        {/* RIGHT: Metrics & Logs */}
-        <section className="col-span-12 lg:col-span-5 flex flex-col gap-6 h-full min-h-0">
-          {/* Metric Cards */}
-          <div className="grid grid-cols-2 gap-4 shrink-0">
-            {/* Level Card */}
-            <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative overflow-hidden group">
-              <div className="flex items-center gap-2 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                <Award size={14} /> Predicted Level
-              </div>
-              <div className="flex items-end gap-2">
-                <span className="text-5xl font-black text-gray-900">
-                  {displayLevel > 0 ? displayLevel.toFixed(1) : "-"}
-                </span>
-                <span className="text-gray-400 font-medium mb-1">/ 5.0</span>
-              </div>
-              <div className="mt-4 h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-knowunity-green transition-all duration-700 ease-out"
-                  style={{ width: `${(displayLevel / 5) * 100}%` }}
-                ></div>
-              </div>
+        {/* --- STATS SECTION --- */}
+        <section
+          className={`
+           ${activeTab === "stats" ? "flex" : "hidden"} 
+           lg:flex col-span-5 flex-col gap-4 h-full p-4 lg:p-0 overflow-hidden
+        `}
+        >
+          {/* Card: Student Level */}
+          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 shrink-0">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-slate-700 flex items-center gap-2 text-sm uppercase tracking-wide">
+                <BarChart2 size={16} className="text-blue-500" /> Assessment
+              </h3>
+              <span className="text-3xl font-black text-slate-800">
+                {currentLevel > 0 ? currentLevel.toFixed(1) : "-"}
+              </span>
             </div>
-
-            {/* Confidence Card */}
-            <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
-              <div className="flex items-center gap-2 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                <Activity size={14} /> AI Confidence
-              </div>
-              <div className="flex items-end gap-2">
-                <span
-                  className={`text-5xl font-black ${
-                    currentConfidence > 0.8
-                      ? "text-green-500"
-                      : currentConfidence > 0.5
-                      ? "text-yellow-500"
-                      : "text-gray-900"
+            <div className="h-3 w-full flex gap-1">
+              {[1, 2, 3, 4, 5].map((lvl) => (
+                <div
+                  key={lvl}
+                  className={`flex-1 rounded-full transition-all duration-500 ${
+                    currentLevel >= lvl
+                      ? "bg-blue-500"
+                      : currentLevel > lvl - 1
+                      ? "bg-blue-200"
+                      : "bg-slate-100"
                   }`}
-                >
-                  {(currentConfidence * 100).toFixed(0)}
-                </span>
-                <span className="text-gray-400 font-medium mb-1">%</span>
-              </div>
-              <div className="mt-4 h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className={`h-full transition-all duration-500 ease-out ${
-                    currentConfidence > 0.8
-                      ? "bg-green-500"
-                      : currentConfidence > 0.5
-                      ? "bg-yellow-500"
-                      : "bg-gray-400"
-                  }`}
-                  style={{ width: `${currentConfidence * 100}%` }}
-                ></div>
-              </div>
-            </div>
-          </div>
-
-          {/* Charts Area */}
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 shrink-0 flex flex-col h-40">
-            <div className="flex items-center gap-2 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-              <BarChart3 size={14} /> Level Progression
-            </div>
-            <div className="flex-1 flex items-end gap-1.5 w-full">
-              {estimates.length === 0 && (
-                <div className="w-full h-full flex items-center justify-center text-xs text-gray-300 border-2 border-dashed border-gray-100 rounded-lg">
-                  Waiting for data...
-                </div>
-              )}
-              {estimates.map((est, i) => (
-                <div
-                  key={i}
-                  className="flex-1 flex flex-col justify-end gap-1 group relative h-full"
-                >
-                  <div
-                    className="w-full bg-blue-500 rounded-t-sm opacity-80 hover:opacity-100 transition-all duration-500"
-                    style={{ height: `${Math.max(5, (est.level / 5) * 100)}%` }}
-                  ></div>
-                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10 pointer-events-none transition-opacity">
-                    Turn {i + 1}: {est.level.toFixed(2)}
-                  </div>
-                </div>
+                />
               ))}
             </div>
+            <div className="flex justify-between text-[10px] text-slate-400 mt-2 font-bold uppercase">
+              <span>Struggling</span>
+              <span>Mastery</span>
+            </div>
           </div>
 
-          {/* Terminal Logs */}
-          <div className="bg-[#1E1E1E] rounded-xl p-4 flex-1 overflow-hidden flex flex-col shadow-inner border border-gray-800 min-h-0">
-            <div className="flex items-center justify-between border-b border-gray-800 pb-2 mb-2 shrink-0">
-              <div className="flex items-center gap-2 text-gray-400 text-xs font-bold uppercase">
-                <Terminal size={12} /> System Kernel
+          {/* Card: Confidence */}
+          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 shrink-0">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="font-bold text-slate-700 flex items-center gap-2 text-sm uppercase tracking-wide">
+                <Activity size={16} className="text-emerald-500" /> Certainty
+              </h3>
+              <span className="text-xl font-bold text-slate-600">
+                {(currentConfidence * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all duration-700 rounded-full ${
+                  currentConfidence > 0.8 ? "bg-emerald-500" : "bg-amber-400"
+                }`}
+                style={{ width: `${currentConfidence * 100}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Log / Notebook */}
+          <div className="flex-1 bg-slate-900 rounded-2xl shadow-lg border border-slate-800 flex flex-col overflow-hidden min-h-[200px]">
+            <div className="px-4 py-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
+                <Terminal size={12} /> System Logs
               </div>
               <div className="flex gap-1.5">
-                <div className="w-2 h-2 rounded-full bg-red-500/50"></div>
-                <div className="w-2 h-2 rounded-full bg-yellow-500/50"></div>
-                <div className="w-2 h-2 rounded-full bg-green-500/50"></div>
+                <div className="w-2 h-2 rounded-full bg-red-500/20"></div>
+                <div className="w-2 h-2 rounded-full bg-yellow-500/20"></div>
+                <div className="w-2 h-2 rounded-full bg-green-500/20"></div>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto space-y-1.5 pr-2 font-mono text-[11px] custom-scrollbar">
+            <div
+              ref={logContainerRef}
+              className="flex-1 overflow-y-auto p-4 space-y-1.5 font-mono text-[11px] custom-scrollbar"
+            >
               {logs.map((log, i) => (
                 <div
                   key={i}
-                  className="flex gap-3 hover:bg-white/5 p-0.5 rounded transition-colors"
+                  className="flex gap-3 hover:bg-white/5 p-1 rounded transition-colors"
                 >
-                  <span className="text-gray-600 shrink-0 select-none">
+                  <span className="text-slate-600 shrink-0 select-none">
                     {new Date(log.timestamp * 1000).toLocaleTimeString([], {
                       hour12: false,
                       minute: "2-digit",
@@ -397,21 +376,72 @@ export default function Dashboard() {
                       log.level === "error"
                         ? "text-red-400 font-bold"
                         : log.level === "success"
-                        ? "text-green-400 font-bold"
+                        ? "text-emerald-400 font-bold"
                         : log.level === "system"
-                        ? "text-blue-300"
-                        : "text-gray-300"
+                        ? "text-blue-400"
+                        : "text-slate-300"
                     }`}
                   >
                     {log.message}
                   </span>
                 </div>
               ))}
-              <div ref={logEndRef} />
             </div>
           </div>
+
+          {/* Final Results */}
+          {(finalScores.mse || finalScores.tutoring) && (
+            <div className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white p-5 rounded-xl shadow-lg animate-in slide-in-from-bottom-4 shrink-0">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-[10px] text-indigo-200 uppercase font-bold tracking-widest mb-1">
+                    MSE Accuracy
+                  </p>
+                  <p className="text-3xl font-black tracking-tight">
+                    {Number(finalScores.mse).toFixed(4)}
+                  </p>
+                </div>
+                <div className="w-px h-10 bg-white/20"></div>
+                <div className="text-right">
+                  <p className="text-[10px] text-indigo-200 uppercase font-bold tracking-widest mb-1">
+                    Tutoring Score
+                  </p>
+                  <p className="text-3xl font-black text-emerald-300 tracking-tight">
+                    {finalScores.tutoring}/5
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </section>
       </main>
+
+      {/* 3. Mobile Bottom Tab Bar */}
+      <div className="lg:hidden shrink-0 h-16 bg-white border-t border-slate-200 flex justify-around items-center px-2 z-30 pb-safe">
+        <button
+          onClick={() => setActiveTab("chat")}
+          className={`flex flex-col items-center gap-1 p-2 px-6 rounded-xl transition-all ${
+            activeTab === "chat"
+              ? "text-knowunity-green bg-emerald-50"
+              : "text-slate-400"
+          }`}
+        >
+          <MessageCircle size={20} />
+          <span className="text-[10px] font-bold">Chat</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("stats")}
+          className={`flex flex-col items-center gap-1 p-2 px-6 rounded-xl transition-all ${
+            activeTab === "stats"
+              ? "text-knowunity-green bg-emerald-50"
+              : "text-slate-400"
+          }`}
+        >
+          <BarChart2 size={20} />
+          <span className="text-[10px] font-bold">Progress</span>
+        </button>
+      </div>
     </div>
   );
 }

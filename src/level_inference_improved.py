@@ -1,4 +1,4 @@
-"""Enhanced level detection with Stabilization Logic (2-6-2 Strategy)"""
+"""Enhanced level detection with Context-Aware Correctness"""
 
 import re
 from typing import Dict, List, Tuple, Optional
@@ -29,7 +29,6 @@ class LevelDetector:
         }
     }
     
-    # Advanced terms only
     TECHNICAL_TERMS = [
         'derivative', 'integral', 'asymptote', 'limit', 'continuity',
         'parametric', 'vector', 'scalar', 'matrix',
@@ -44,6 +43,11 @@ class LevelDetector:
         "correct": [r"exactly", r"correct", r"yes,? that'?s right", r"good job", r"perfect", r"spot on", r"you got it", r"doing great", r"right track"],
         "incorrect": [r"not quite", r"actually", r"almost", r"close"]
     }
+
+    SENTIMENT_SIGNALS = {
+        "frustrated": [r"ugh", r"hate", r"stupid", r"annoying", r"give up", r"too hard", r"boring", r"confusing"],
+        "curious": [r"cool", r"wow", r"interesting", r"why", r"how come"]
+    }
     
     def __init__(self):
         self.level_scores = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
@@ -53,36 +57,54 @@ class LevelDetector:
         self.correctness_history = []
         self.confusion_detected = False
         self.advanced_vocabulary_count = 0
+        self.current_sentiment = "neutral"
+        self.last_tutor_msg = ""
     
     def add_exchange(self, tutor_msg: str, student_msg: str):
         self.turns_analyzed += 1
-        self._analyze_correctness(tutor_msg)
+        self._analyze_correctness(tutor_msg) # Analyze TUTOR reaction to PREVIOUS student msg
+        self._analyze_sentiment(student_msg)
         self._analyze_response(student_msg)
         self._update_estimate()
+        self.last_tutor_msg = tutor_msg
     
     def _analyze_correctness(self, tutor_msg: str):
         tutor_lower = tutor_msg.lower()
         is_correct = any(re.search(p, tutor_lower) for p in self.CORRECTNESS_PATTERNS["correct"])
         is_incorrect = any(re.search(p, tutor_lower) for p in self.CORRECTNESS_PATTERNS["incorrect"])
         
+        # Check if the PREVIOUS tutor message (which prompted this answer) had scaffolding
+        # If the tutor basically gave the answer or a picture, the student gets less credit.
+        was_scaffolded = "image" in self.last_tutor_msg.lower() or "try" in self.last_tutor_msg.lower()
+        
         if is_correct and not is_incorrect:
             self.correctness_history.append(True)
-            # Correct = Level 3 (Competent)
-            self.level_scores[3] += 2.0
+            if was_scaffolded:
+                self.level_scores[2] += 2.0 # Supported success = Level 2
+                self.level_scores[3] += 0.5
+            else:
+                self.level_scores[3] += 2.0 # Independent success = Level 3
         elif is_incorrect:
             self.correctness_history.append(False)
-            self.level_scores[1] += 1.5
+            self.level_scores[1] += 2.0 # Increased penalty for wrong answers
             self.level_scores[2] += 1.0
+
+    def _analyze_sentiment(self, text: str):
+        text_lower = text.lower()
+        if any(re.search(p, text_lower) for p in self.SENTIMENT_SIGNALS["frustrated"]):
+            self.current_sentiment = "frustrated"
+        elif any(re.search(p, text_lower) for p in self.SENTIMENT_SIGNALS["curious"]):
+            self.current_sentiment = "curious"
+        else:
+            self.current_sentiment = "neutral"
     
     def _analyze_response(self, response: str):
         response_lower = response.lower()
         words = len(response.split())
         
-        # Check for confusion signs
         if any(re.search(p, response_lower) for p in self.LEVEL_SIGNALS[1]["strong"] + self.LEVEL_SIGNALS[2]["strong"]):
             self.confusion_detected = True
         
-        # Check for Advanced Vocabulary
         term_count = sum(1 for term in self.TECHNICAL_TERMS if term in response_lower)
         self.advanced_vocabulary_count += term_count
         
@@ -90,14 +112,12 @@ class LevelDetector:
             self.level_scores[4] += 1.0 * term_count
             self.level_scores[5] += 3.0 * term_count
 
-        # Length Heuristic
         if words > 40:
             self.level_scores[5] += 1.0
             self.level_scores[4] += 1.0
         elif words < 6 and ("?" in response or "what" in response_lower):
             self.level_scores[1] += 2.0
             
-        # Pattern Matching
         for level, patterns in self.LEVEL_SIGNALS.items():
             for p in patterns["strong"]:
                 if re.search(p, response_lower):
@@ -110,17 +130,14 @@ class LevelDetector:
         total = sum(self.level_scores.values())
         if total == 0: return
 
-        # 1. Calculate Raw Estimate from Data
         weighted_sum = sum(lvl * score for lvl, score in self.level_scores.items())
         raw_estimate = weighted_sum / total
         
-        # 2. Apply Logical Clamps (Bounds Checking)
-        
-        # Level 1 Clamp
-        if (self.level_scores[1] / total) > 0.25: 
-            raw_estimate = min(raw_estimate, 1.4)
+        # --- LOGIC CLAMPS ---
+        # If confused/frustrated, cap at 1.5 (Strict Level 1)
+        if (self.level_scores[1] / total) > 0.35 and (self.current_sentiment == "frustrated" or self.confusion_detected): 
+            raw_estimate = min(raw_estimate, 1.49)
             
-        # Level 5 Clamp
         l5_ratio = self.level_scores[5] / total
         if l5_ratio > 0.35: 
             is_high_level_confusion = self.confusion_detected and self.advanced_vocabulary_count > 2
@@ -129,30 +146,18 @@ class LevelDetector:
             else:
                 raw_estimate = max(raw_estimate, 4.6)
 
-        # 3. STABILIZATION (The 2-6-2 Strategy)
-        # This prevents the "drifting up" issue by anchoring to the previous value.
-        
+        # --- STABILIZATION ---
         if self.turns_analyzed <= 2:
-            # Phase 1: Rapid Diagnosis
-            # Trust the raw data completely to allow quick jumps
             self.current_estimate = raw_estimate
-            
         elif self.turns_analyzed <= 8:
-            # Phase 2: Dampened Teaching
-            # 80% Previous Estimate + 20% New Raw Data
-            # This makes the score "heavy" and hard to move up quickly
-            self.current_estimate = (self.current_estimate * 0.8) + (raw_estimate * 0.2)
-            
+            self.current_estimate = (self.current_estimate * 0.7) + (raw_estimate * 0.3)
         else:
-            # Phase 3: Lock
-            # 95% Previous Estimate + 5% New Data
-            # Effectively freezes the score for the final evaluation
             self.current_estimate = (self.current_estimate * 0.95) + (raw_estimate * 0.05)
             
         self.confidence = min(0.95, total * 0.1)
     
-    def get_estimate(self) -> Tuple[float, float]:
-        return self.current_estimate, self.confidence
+    def get_estimate(self) -> Tuple[float, float, str]:
+        return self.current_estimate, self.confidence, self.current_sentiment
 
 class HybridLevelDetector:
     def __init__(self, llm_client=None):
@@ -166,28 +171,27 @@ class HybridLevelDetector:
     def add_exchange(self, tutor_msg: str, student_msg: str):
         self.rule_detector.add_exchange(tutor_msg, student_msg)
     
-    def get_estimate(self, use_llm: bool = True) -> Tuple[float, float]:
-        rule_est, rule_conf = self.rule_detector.get_estimate()
+    def get_estimate(self, use_llm: bool = True) -> Tuple[float, float, str]:
+        rule_est, rule_conf, sentiment = self.rule_detector.get_estimate()
         
         if not use_llm or not self.llm_client:
-            return rule_est, rule_conf
+            return rule_est, rule_conf, sentiment
             
         try:
             llm_res = self.llm_client.analyze_level(self.rule_detector.conversation_history[-6:], self.topic)
             llm_est = float(llm_res.get("level", 3.0))
+            if "sentiment" in llm_res:
+                sentiment = llm_res["sentiment"]
             
-            # Use same dampening logic for LLM mix
-            # If we are late in the conversation, trust the stabilized rule detector more
+            # Less dampening on LLM to trust its judgment more on complex cases
             if self.rule_detector.turns_analyzed > 5:
-                combined = (llm_est * 0.4) + (rule_est * 0.6)
+                combined = (llm_est * 0.5) + (rule_est * 0.5)
             else:
                 combined = (llm_est * 0.6) + (rule_est * 0.4)
             
-            # Safety Nets
-            if rule_est < 1.5: combined = min(combined, 1.5)
-            if self.rule_detector.confusion_detected and self.rule_detector.advanced_vocabulary_count <= 2:
-                combined = min(combined, 3.9)
+            # HARD CLAMP for Rule-Based Level 1 override
+            if rule_est < 1.5: combined = min(combined, 1.45)
             
-            return combined, max(rule_conf, 0.8)
+            return combined, max(rule_conf, 0.8), sentiment
         except:
-            return rule_est, rule_conf
+            return rule_est, rule_conf, sentiment
